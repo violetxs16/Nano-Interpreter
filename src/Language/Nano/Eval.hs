@@ -12,6 +12,7 @@ import Control.Exception (throw, catch)
 import Language.Nano.Types
 import Language.Nano.Parser
 import Data.Bifoldable (bifoldl1)
+import Foreign (toBool)
 
 --------------------------------------------------------------------------------
 execFile :: FilePath -> IO Value
@@ -170,16 +171,33 @@ eval :: Env -> Expr -> Value
 --------------------------------------------------------------------------------
 eval _ (EInt n) = VInt n
 eval env (EVar s) = lookupId s env
-eval env (EBin op v1 v2) = evalOp op (eval env v1) (eval env v2)
 eval _ (EBool b) = VBool b
-eval env (EIf (EBool b) v1 v2) = if b then (eval env v1) else (eval env v2)
-eval _ (EIf _ _ _) = throw (Error "Type Error") --avoiding catch all case
 eval env (EBin op v1 v2) = evalOp op (eval env v1) (eval env v2)
-eval _ (EBin _ _ _) = throw (Error "Type Error") --avoiding catch all case
-eval env (ELet id v1 v2) = eval (extendEnv id (eval env v1) env) v2
-eval _ (ELet _ _ _) = throw (Error "Type Error") --avoiding catch all case
+eval env (EIf condOrig v1 v2) = if ifHelper (eval env condOrig) then eval env v1 else eval env v2
+  where ifHelper :: Value -> Bool
+        ifHelper (VBool b) = b
+        ifHelper _ = throw (Error ("type error in EIf"))
+  --let cond = eval env condOrig in if cond then (eval env v1) else (eval env v2)
+--eval _ (EIf _ _ _) = throw (Error ("type error in EIf")) --avoiding catch all case
+--eval _ (EBin _ _ _) = throw (Error ("type error")) --avoiding catch all case
+eval env (ELet id v1 v2) = 
+  let newEnv = extendEnv id x env 
+      x = eval newEnv v1 
+  in eval newEnv v2 
+--eval env (ELet id v1 v2) = eval env' v2
+  --where 
+    --env' = (extendEnv id (eval env v1) env)
+--eval _ (ELet _ _ _) = throw (Error ("type error")) --avoiding catch all case
 
---eval env (ELam id v1) = eval env ()
+eval env (ELam id v1) = VClos env id v1
+
+--eval env (EApp v1 v2) = appHelper v1 v2 env (eval env v1)
+eval env (EApp funcExpr argExpr) = appHelper (eval env funcExpr)
+  where appHelper :: Value -> Value
+        appHelper (VClos closureEnv id closureBody ) = eval (extendEnv id (eval env argExpr) closureEnv) closureBody
+        appHelper (VPrim f) = f (eval env argExpr)
+        appHelper _ = throw (Error ("type error"))
+eval _ ENil = VNil
 
 
 
@@ -188,21 +206,23 @@ eval _ (ELet _ _ _) = throw (Error "Type Error") --avoiding catch all case
 evalOp :: Binop -> Value -> Value -> Value
 --------------------------------------------------------------------------------
 evalOp Plus (VInt v1) (VInt v2) = VInt ((+) v1 v2)
-evalOp Plus _ _ = throw (Error "type Error")
+evalOp Plus _ _ = throw (Error ("type error in plus operation"))
 evalOp Minus (VInt v1) (VInt v2) = VInt ((-) v1 v2)
-evalOp Minus _ _ = throw (Error "type Error")
+evalOp Minus _ _ = throw (Error ("type error in minus operation"))
 evalOp Mul (VInt v1) (VInt v2) = VInt ((*) v1 v2)
-evalOp Mul _ _ = throw (Error "type Error")
-evalOp Eq x y = if x == y then (VBool True) else (VBool False)
-evalOp Ne x y = if x /= y then (VBool True) else (VBool False)
-evalOp Lt (VInt v1) (VInt v2) = if v1 < v2 then (VBool True) else (VBool False)
-evalOp Lt _ _ = throw (Error "type Error")
-evalOp Le (VInt v1) (VInt v2) = if v1 <= v2 then (VBool True) else (VBool False)
-evalOp Le _ _ = throw (Error "type Error")
-evalOp And (VBool v1) (VBool v2) = if v1 == True then (if v2 == True then (VBool True) else (VBool False)) else (VBool False)
-evalOp And _ _  = throw (Error "type Error")
-evalOp Or (VBool v1) (VBool v2) = if v1 == True then (VBool True) else (if v2 == True then (VBool True) else (VBool False))
-evalOp Or _ _ = throw (Error "type Error")
+evalOp Mul _ _ = throw (Error ("type error in multiply operation"))
+evalOp Eq x y = VBool (x == y)
+evalOp Ne x y = VBool (x /= y) 
+evalOp Lt (VInt v1) (VInt v2) = VBool (v1 < v2)
+evalOp Lt _ _ = throw (Error ("type error in less than"))
+evalOp Le (VInt v1) (VInt v2) = VBool (v1 <= v2)
+evalOp Le _ _ = throw (Error ("type error in less than or equal to"))
+evalOp And (VBool v1) (VBool v2) = VBool (v1 && v2)
+evalOp And _ _  = throw (Error ("type error in And "))
+evalOp Or (VBool v1) (VBool v2) = VBool (v1 || True)
+evalOp Or _ _ = throw (Error ("type error in Or"))
+evalOp Cons v1 v2 = VPair v1 v2
+
 
 
 --------------------------------------------------------------------------------
@@ -233,12 +253,21 @@ lookupId id ((key, val):xs) = if id == key then val else lookupId id xs
 extendEnv :: Id -> Value -> Env -> Env
 --------------------------------------------------------------------------------
 extendEnv x v env = (x,v):env
+vHead :: Value -> Value
+vHead (VPair v1 v2) = v1
+vHead _ = throw (Error ("type error"))
 
+vTail :: Value -> Value
+vTail (VPair v1 v2) = v2
+vTail _ = throw (Error ("type error"))
 
 prelude :: Env
 prelude =
   [ -- HINT: you may extend this "built-in" environment
     -- with some "operators" that you find useful...
+    --head :: (Value -> Value) -> Value -> Value
+    ("head", VPrim vHead),
+    ("tail", VPrim vTail)
   ]
 
 env0 :: Env

@@ -1,0 +1,1 @@
+Resources user: Class lecture notes
